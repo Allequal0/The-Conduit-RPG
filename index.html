@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Conduit: A Subconscious Scheme</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #1e1e2e; color: #cdd6f4; }
+        #game-output { 
+            max-height: 70vh; 
+            overflow-y: auto; 
+            scroll-behavior: smooth;
+            border-bottom: 2px solid #45475a;
+        }
+        #user-input {
+            background-color: #313244;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+        }
+        #user-input:focus {
+            outline: none;
+            border-color: #89b4fa;
+            box-shadow: 0 0 0 3px rgba(137, 180, 250, 0.3);
+        }
+        .prompt-arrow { color: #89b4fa; }
+        .system-message { color: #f9e2af; font-style: italic; }
+        .error-message { color: #f38ba8; }
+        .location-title { color: #a6e3a1; font-weight: 800; }
+    </style>
+</head>
+<body class="p-4 flex flex-col h-screen max-w-4xl mx-auto">
+
+    <!-- Header -->
+    <header class="text-center mb-4">
+        <h1 class="text-4xl font-extrabold text-white tracking-tight">The Conduit</h1>
+        <p class="text-sm text-[#b4befe] mt-1">A Subconscious Scheme</p>
+    </header>
+
+    <!-- Game Output Window -->
+    <div id="game-output" class="flex-grow p-4 space-y-3 bg-[#282a36] rounded-t-xl shadow-inner">
+        <!-- Game text will be rendered here by JavaScript -->
+    </div>
+
+    <!-- Input Area -->
+    <div class="mt-0 flex">
+        <span class="prompt-arrow p-3 bg-[#313244] rounded-bl-xl border-t-2 border-l-2 border-b-2 border-transparent">>&nbsp;</span>
+        <input type="text" id="user-input" placeholder="Type 'look', 'go [direction]', 'take [item]', 'use [item]'..."
+               class="flex-grow p-3 rounded-br-xl focus:outline-none w-full">
+    </div>
+
+    <!-- Core Game Engine (JavaScript) -->
+    <script>
+        // --- DOM Elements ---
+        const output = document.getElementById('game-output');
+        const input = document.getElementById('user-input');
+
+        // --- Player Model ---
+        const player = {
+            currentRoom: 'studio',
+            inventory: [],
+            stats: {
+                influence: 1,  // The core RPG stat
+                observation: 1 // For seeing details
+            },
+            quests: {
+                journeyOfThree: 'inactive' // Quest log
+            }
+        };
+
+        // --- World Model (The FSM) ---
+        const world = {
+            'studio': {
+                name: "The Conduit's Studio",
+                description: "A sparse, high-ceiling room lit by a single, bare bulb. The air smells of old paper, charcoal, and ozone. A massive, unfinished canvas dominates the east wall, depicting a complex, web-like city. A simple desk sits to the west. A heavy steel door leads [north] to the city streets.",
+                exits: {
+                    'north': 'street_corner'
+                },
+                items: ['worn_notebook', 'charcoal_pencil'],
+                interactions: {
+                    'canvas': "You look at the canvas. It's a map of the city, but the streets are drawn like synapses, connecting everything in a 'subconscious scheme'. It feels... unfinished.",
+                    'desk': "The desk is bare except for a [worn_notebook] and a [charcoal_pencil]."
+                }
+            },
+            'street_corner': {
+                name: "Street Corner (Rain)",
+                description: "You are on a rain-slicked street corner under a flickering neon sign. The city towers above, a monument of steel and glass. You can go [south] back into your studio, or [east] towards the old Archive.",
+                exits: {
+                    'south': 'studio',
+                    'east': 'archive_entrance'
+                },
+                items: [],
+                interactions: {
+                    'sign': "The neon sign buzzes, its red light flickering. It reads 'All Things Connect'."
+                }
+            },
+            'archive_entrance': {
+                name: "Archive Entrance",
+                description: "A grand, marble building stands before you, its bronze doors imposing. This is the Municipal Archive, a library of the city's (and the world's) history. A stoic-looking [guard] stands by the door. You can go [west] back to the street.",
+                exits: {
+                    'west': 'street_corner'
+                },
+                items: [],
+                interactions: {
+                    'guard': "The guard is a tall man in a crisp, grey uniform. He looks at you with a neutral expression. 'The Archive is closed for... restructuring. No visitors.' You could try to [talk_to guard] or [show guard] something."
+                }
+            }
+            // More rooms will be added here
+        };
+
+        // --- Game Loop & Initialization ---
+        
+        // Add event listener for user input
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const command = input.value.trim();
+                if (command) {
+                    renderOutput(`> ${command}`, 'user-input');
+                    parseCommand(command);
+                }
+                input.value = '';
+                output.scrollTop = output.scrollHeight;
+            }
+        });
+
+        function startGame() {
+            renderOutput("Initializing: The Conduit (V 1.0)", 'system-message');
+            renderOutput("Type 'help' for a list of commands.", 'system-message');
+            handleLook(); // Initial 'look'
+        }
+
+        // --- Command Parser ---
+        function parseCommand(command) {
+            const parts = command.toLowerCase().split(' ');
+            const verb = parts[0];
+            const noun = parts.slice(1).join('_'); // e.g., "worn notebook" -> "worn_notebook"
+
+            switch (verb) {
+                case 'look':
+                    handleLook(noun);
+                    break;
+                case 'go':
+                    handleGo(noun);
+                    break;
+                case 'take':
+                    handleTake(noun);
+                    break;
+                case 'use':
+                    handleUse(noun);
+                    break;
+                case 'i':
+                case 'inv':
+                case 'inventory':
+                    handleInventory();
+                    break;
+                case 'check':
+                case 'stats':
+                    handleCheck(noun);
+                    break;
+                case 'talk_to':
+                    handleTalk(noun);
+                    break;
+                case 'show':
+                    handleShow(noun); // e.g., 'show worn_notebook'
+                    break;
+                case 'help':
+                    handleHelp();
+                    break;
+                default:
+                    renderOutput("I don't understand that command. (Try 'help')", 'error-message');
+            }
+        }
+
+        // --- Core Command Handlers ---
+
+        function handleLook(noun) {
+            const room = world[player.currentRoom];
+            if (!noun) {
+                // General 'look'
+                renderOutput(room.name, 'location-title');
+                renderOutput(room.description);
+                if (room.items.length > 0) {
+                    renderOutput(`You see: ${room.items.join(', ').replace(/_/g, ' ')}.`);
+                }
+            } else {
+                // Look at specific interaction
+                if (room.interactions[noun]) {
+                    renderOutput(room.interactions[noun]);
+                } else {
+                    renderOutput("You don't see anything special about that.", 'error-message');
+                }
+            }
+        }
+
+        function handleGo(direction) {
+            const room = world[player.currentRoom];
+            if (room.exits[direction]) {
+                player.currentRoom = room.exits[direction];
+                handleLook(); // Automatically 'look' on entering new room
+            } else {
+                renderOutput("You can't go that way.", 'error-message');
+            }
+        }
+
+        function handleTake(noun) {
+            const room = world[player.currentRoom];
+            if (room.items.includes(noun)) {
+                // Remove from room
+                room.items = room.items.filter(item => item !== noun);
+                // Add to inventory
+                player.inventory.push(noun);
+                renderOutput(`You took the ${noun.replace(/_/g, ' ')}.`);
+                
+                // --- INCITING INCIDENT (from poem) ---
+                if (noun === 'worn_notebook' && player.quests.journeyOfThree === 'inactive') {
+                    player.quests.journeyOfThree = 'active';
+                    renderOutput("You open the first page of the notebook. Three words are scribbled in charcoal: [Nature], [Art], and [History]. A journey of three.", 'system-message');
+                }
+
+            } else {
+                renderOutput("You can't take that.", 'error-message');
+            }
+        }
+        
+        function handleInventory() {
+            if (player.inventory.length === 0) {
+                renderOutput("Your inventory is empty.");
+            } else {
+                renderOutput("You are carrying: " + player.inventory.join(', ').replace(/_/g, ' '));
+            }
+        }
+
+        function handleCheck(noun) {
+            if (!noun || noun === 'stats') {
+                renderOutput(`--- Conduit Stats ---`);
+                renderOutput(`Observation: ${player.stats.observation}`);
+                renderOutput(`Influence: ${player.stats.influence}`);
+            } else if (noun === 'quests' || noun === 'journal') {
+                renderOutput(`--- Quest Log ---`);
+                renderOutput(`The Journey of Three: ${player.quests.journeyOfThree}`);
+            } else {
+                renderOutput("You can 'check stats' or 'check quests'.", 'error-message');
+            }
+        }
+
+        function handleHelp() {
+            renderOutput(`--- Common Commands ---`);
+            renderOutput(`**look**: (or 'look [item]') Look at the room or an item.`);
+            renderOutput(`**go [direction]**: (e.g., 'go north') Move to a new room.`);
+            renderOutput(`**take [item]**: (e.g., 'take worn_notebook') Pick up an item.`);
+            // renderOutput(`**use [item]**: (e.g., 'use charcoal_pencil') Use an item.`);
+            renderOutput(`**talk_to [person]**: (e.g., 'talk_to guard') Speak to someone.`);
+            renderOutput(`**show [item]**: (e.g., 'show worn_notebook') Show an item to someone.`);
+            renderOutput(`**inventory**: (or 'i') Check your inventory.`);
+            renderOutput(`**check stats**: (or 'check quests') Check your status.`);
+        }
+        
+        // --- RPG MECHANIC HANDLERS ---
+        
+        function handleTalk(noun) {
+            const room = world[player.currentRoom];
+            if (noun === 'guard' && player.currentRoom === 'archive_entrance') {
+                // This is where the core RPG mechanic 'Influence' will be checked.
+                if (player.stats.influence > 3) {
+                    renderOutput("'The Archive is closed... but... I suppose you aren't a typical visitor. You seem... different. Very well, you may enter. Do not cause trouble.' The guard steps aside.", 'system-message');
+                    // We would then add the exit: room.exits['east'] = 'archive_main_hall';
+                } else {
+                    renderOutput("'I already told you, the Archive is closed. Move along.' He seems unmoved by your words.", 'error-message');
+                }
+            } else {
+                renderOutput("There is no one here by that name to talk to.");
+            }
+        }
+        
+        // STUBS for future logic
+        function handleUse(noun) {
+            renderOutput("You aren't sure how to use that right now.", 'error-message');
+        }
+        
+        function handleShow(noun) {
+            renderOutput("You show the item, but get no reaction.", 'error-message');
+        }
+
+        // --- Utility ---
+        function renderOutput(text, style = 'game-text') {
+            const p = document.createElement('p');
+            p.innerHTML = text; // Using innerHTML to allow for bold tags etc.
+            p.className = style;
+            output.appendChild(p);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        // --- Start the Game ---
+        startGame();
+
+    </script>
+</body>
+</html>
