@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Conduit: A Subconscious Scheme</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #1e1e2e; color: #cdd6f4; }
+        #game-output { 
+            max-height: 70vh; 
+            overflow-y: auto; 
+            scroll-behavior: smooth;
+            border-bottom: 2px solid #45475a;
+        }
+        #user-input {
+            background-color: #313244;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+        }
+        #user-input:focus {
+            outline: none;
+            border-color: #89b4fa;
+            box-shadow: 0 0 0 3px rgba(137, 180, 250, 0.3);
+        }
+        .prompt-arrow { color: #89b4fa; }
+        .system-message { color: #f9e2af; font-style: italic; }
+        .error-message { color: #f38ba8; }
+        .location-title { color: #a6e3a1; font-weight: 800; }
+        .success-message { color: #a6e3a1; font-weight: bold; }
+    </style>
+</head>
+<body class="p-4 flex flex-col h-screen max-w-4xl mx-auto">
+
+    <!-- Header -->
+    <header class="text-center mb-4">
+        <h1 class="text-4xl font-extrabold text-white tracking-tight">The Conduit</h1>
+        <p class="text-sm text-[#b4befe] mt-1">A Subconscious Scheme (V 2.0)</p>
+    </header>
+
+    <!-- Game Output Window -->
+    <div id="game-output" class="flex-grow p-4 space-y-3 bg-[#282a36] rounded-t-xl shadow-inner">
+        <!-- Game text will be rendered here by JavaScript -->
+    </div>
+
+    <!-- Input Area -->
+    <div class="mt-0 flex">
+        <span class="prompt-arrow p-3 bg-[#313244] rounded-bl-xl border-t-2 border-l-2 border-b-2 border-transparent">>&nbsp;</span>
+        <input type="text" id="user-input" placeholder="Type 'look', 'go [direction]', 'take [item]', 'use [item]'..."
+               class="flex-grow p-3 rounded-br-xl focus:outline-none w-full">
+    </div>
+
+    <!-- Core Game Engine (JavaScript) -->
+    <script>
+        // --- DOM Elements ---
+        const output = document.getElementById('game-output');
+        const input = document.getElementById('user-input');
+
+        // --- Player Model ---
+        const player = {
+            currentRoom: 'studio',
+            inventory: [],
+            stats: {
+                influence: 1,  // The core RPG stat
+                observation: 1 // For seeing details
+            },
+            quests: {
+                journeyOfThree: 'inactive', // 'active', 'history_complete', 'art_complete', 'nature_complete', 'complete'
+                found_history_cipher: false
+            }
+        };
+
+        // --- World Model (The FSM) ---
+        const world = {
+            'studio': {
+                name: "The Conduit's Studio",
+                description: "A sparse, high-ceiling room lit by a single, bare bulb. The air smells of old paper, charcoal, and ozone. A massive, unfinished canvas dominates the east wall, depicting a complex, web-like city. A simple desk sits to the west. A heavy steel door leads [north] to the city streets. A small, hidden [cubby] might be worth investigating.",
+                exits: {
+                    'north': 'street_corner'
+                },
+                items: ['charcoal_pencil'],
+                interactions: {
+                    'canvas': "You look at the canvas. It's a map of the city, but the streets are drawn like synapses, connecting everything in a 'subconscious scheme'. It feels... unfinished.",
+                    'desk': "The desk is bare except for a [charcoal_pencil].",
+                    'cubby': "Tucked away in a dark cubby is a [worn_notebook]. You recognize the cover immediately."
+                }
+            },
+            'street_corner': {
+                name: "Street Corner (Rain)",
+                description: "You are on a rain-slicked street corner under a flickering neon sign. The city towers above, a monument of steel and glass. You can go [south] back into your studio, or [east] towards the old Archive. To the [west], you see the flickering lights of the Cafe of Whispers.",
+                exits: {
+                    'south': 'studio',
+                    'east': 'archive_entrance',
+                    'west': 'cafe_of_whispers'
+                },
+                items: [],
+                interactions: {
+                    'sign': "The neon sign buzzes, its red light flickering. It reads 'All Things Connect'."
+                }
+            },
+            'cafe_of_whispers': {
+                name: "The Cafe of Whispers",
+                description: "A dimly lit cafe where patrons speak in hushed tones, surrounded by dusty, framed photographs of old architecture. A single, empty [table] sits in the corner. The door leads [east] back to the street.",
+                exits: {
+                    'east': 'street_corner'
+                },
+                items: [],
+                interactions: {
+                    'table': "The surface is sticky. Scratched into the wood is a crude diagram of three interlocking circles labelled 'N', 'A', and 'H'.",
+                    'photographs': "The photos show the city's original structure. They seem to suggest the city was built not by engineers, but by artists."
+                }
+            },
+            'archive_entrance': {
+                name: "Archive Entrance",
+                description: "A grand, marble building stands before you, its bronze doors imposing. This is the Municipal Archive, a library of the city's history. A stoic-looking [guard] stands by the door. You can go [west] back to the street.",
+                exits: {
+                    'west': 'street_corner'
+                },
+                items: [],
+                interactions: {
+                    'guard': "The guard is a tall man in a crisp, grey uniform. He looks at you with a neutral expression. 'The Archive is closed for... restructuring. No visitors.' You could try to [talk_to guard] or [show guard] something."
+                }
+            },
+            'archive_main_hall': {
+                name: "The Main Hall of Records",
+                description: "The air here is cold and smells intensely of dust and ozone. Endless rows of shelving stretch into the dim distance, holding millennia of recorded human action. The hall is utterly silent. There is an imposing, thick steel door marked 'VAULT' to the [north]. You can go [south] back to the entrance.",
+                exits: {
+                    'south': 'archive_entrance',
+                    'north': 'history_vault' // Requires unlocking
+                },
+                items: [],
+                interactions: {
+                    'shelving': "The records are too dense and numerous to search manually. You need a key, or perhaps a cipher, to find the specific connection to History."
+                }
+            },
+            'history_vault': {
+                name: "The History Vault (Objective: History)",
+                description: "A small, heavily reinforced room. In the center, a pedestal holds a single, sealed [scroll]. The air hums with latent energy—this is a nexus of the city's historical memory. There is a small [keypad] next to the scroll pedestal. The exit is [south].",
+                exits: {
+                    'south': 'archive_main_hall'
+                },
+                items: ['sealed_scroll'],
+                interactions: {
+                    'keypad': "The keypad flashes a message: 'INPUT KEY: The year the past became malleable.'",
+                    'scroll': "The sealed scroll is clearly the artifact you need for the 'History' component of the quest. It is locked to the pedestal.",
+                    'pedestal': "The pedestal has a slot matching the shape of the [charcoal_pencil] you carry."
+                }
+            }
+            // Art and Nature Zones will be added next.
+        };
+
+        // --- Game Loop & Initialization ---
+        
+        // Add event listener for user input
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const command = input.value.trim();
+                if (command) {
+                    renderOutput(`<span class="prompt-arrow">&gt;</span> ${command}`, 'user-input-echo');
+                    parseCommand(command);
+                }
+                input.value = '';
+                output.scrollTop = output.scrollHeight;
+            }
+        });
+
+        function startGame() {
+            renderOutput("Initializing: The Conduit (V 2.0)", 'system-message');
+            renderOutput("Type 'help' for a list of commands.", 'system-message');
+            handleLook(); // Initial 'look'
+        }
+
+        // --- Command Parser ---
+        function parseCommand(command) {
+            const parts = command.toLowerCase().split(' ');
+            const verb = parts[0];
+            const noun = parts.slice(1).join('_'); // e.g., "worn notebook" -> "worn_notebook"
+
+            switch (verb) {
+                case 'look':
+                    handleLook(noun);
+                    break;
+                case 'go':
+                    handleGo(noun);
+                    break;
+                case 'take':
+                    handleTake(noun);
+                    break;
+                case 'use':
+                    handleUse(noun, parts.slice(2).join('_'));
+                    break;
+                case 'i':
+                case 'inv':
+                case 'inventory':
+                    handleInventory();
+                    break;
+                case 'check':
+                case 'stats':
+                    handleCheck(noun);
+                    break;
+                case 'talk_to':
+                    handleTalk(noun);
+                    break;
+                case 'show':
+                    handleShow(noun, parts.slice(2).join('_')); // e.g., 'show worn_notebook to guard'
+                    break;
+                case 'enter': // for keypad inputs
+                    handleEnter(noun);
+                    break;
+                case 'help':
+                    handleHelp();
+                    break;
+                default:
+                    renderOutput("I don't understand that command. (Try 'help')", 'error-message');
+            }
+        }
+
+        // --- Core Command Handlers ---
+
+        function handleLook(noun) {
+            const room = world[player.currentRoom];
+            if (!noun) {
+                // General 'look'
+                renderOutput(room.name, 'location-title');
+                renderOutput(room.description);
+                if (room.items && room.items.length > 0) {
+                    renderOutput(`You see: ${room.items.join(', ').replace(/_/g, ' ')}.`);
+                }
+            } else {
+                // Look at specific interaction
+                const cleanNoun = noun.replace(/_/g, ' ');
+                if (room.interactions[noun]) {
+                    renderOutput(room.interactions[noun]);
+                } else if (room.items && room.items.includes(noun)) {
+                     // Check if it's in the room as an item
+                    renderOutput(`It's the ${cleanNoun}. You should probably 'take' it.`);
+                } else if (player.inventory.includes(noun)) {
+                    renderOutput(`You examine the ${cleanNoun} in your inventory. It feels important.`);
+                } else {
+                    renderOutput("You don't see anything special about that.", 'error-message');
+                }
+            }
+        }
+
+        function handleGo(direction) {
+            const room = world[player.currentRoom];
+            
+            // SPECIAL EXIT LOGIC: North from Main Hall is locked until puzzle solved
+            if (player.currentRoom === 'archive_main_hall' && direction === 'north') {
+                if (player.quests.found_history_cipher) {
+                    player.currentRoom = room.exits[direction];
+                    handleLook(); 
+                } else {
+                    renderOutput("The steel door is sealed and locked. It requires the 'Key: The year the past became malleable.'", 'error-message');
+                }
+                return;
+            }
+            
+            if (room.exits[direction]) {
+                player.currentRoom = room.exits[direction];
+                handleLook(); // Automatically 'look' on entering new room
+            } else {
+                renderOutput("You can't go that way.", 'error-message');
+            }
+        }
+
+        function handleTake(noun) {
+            const room = world[player.currentRoom];
+            
+            // Special logic for the notebook (Inciting Incident)
+            if (noun === 'worn_notebook' && player.currentRoom === 'studio') {
+                player.inventory.push(noun);
+                renderOutput(`You took the ${noun.replace(/_/g, ' ')}. It feels warm to the touch.`);
+                
+                if (player.quests.journeyOfThree === 'inactive') {
+                    player.quests.journeyOfThree = 'active';
+                    renderOutput("You open the first page of the notebook. Three words are scribbled in charcoal: **[Nature], [Art], and [History]**. A journey of three has begun.", 'success-message');
+                }
+                // Since it's an interaction item, we don't remove it from a generic item list, 
+                // but we should update the studio description later to reflect it's gone.
+                
+                // For now, let's just make sure it can't be taken again
+                room.interactions.cubby = "The cubby is now empty.";
+                return;
+            }
+
+            // Generic item logic
+            if (room.items && room.items.includes(noun)) {
+                room.items = room.items.filter(item => item !== noun);
+                player.inventory.push(noun);
+                renderOutput(`You took the ${noun.replace(/_/g, ' ')}.`);
+            } else {
+                renderOutput("You can't take that.", 'error-message');
+            }
+        }
+        
+        function handleInventory() {
+            if (player.inventory.length === 0) {
+                renderOutput("Your inventory is empty.");
+            } else {
+                renderOutput("You are carrying: " + player.inventory.join(', ').replace(/_/g, ' '));
+            }
+        }
+
+        function handleCheck(noun) {
+            if (!noun || noun === 'stats') {
+                renderOutput(`--- Conduit Stats ---`);
+                renderOutput(`Observation: ${player.stats.observation}`);
+                renderOutput(`Influence: ${player.stats.influence}`);
+            } else if (noun === 'quests' || noun === 'journal') {
+                renderOutput(`--- Quest Log ---`);
+                renderOutput(`The Journey of Three: ${player.quests.journeyOfThree.replace(/_/g, ' ')}`);
+            } else {
+                renderOutput("You can 'check stats' or 'check quests'.", 'error-message');
+            }
+        }
+
+        function handleHelp() {
+            renderOutput(`--- Common Commands ---`);
+            renderOutput(`**look**: (or 'look [item]') Look at the room or an item.`);
+            renderOutput(`**go [direction]**: (e.g., 'go north') Move to a new room.`);
+            renderOutput(`**take [item]**: (e.g., 'take worn_notebook') Pick up an item.`);
+            renderOutput(`**use [item]**: (e.g., 'use charcoal_pencil on pedestal') Interact with the world.`);
+            renderOutput(`**talk_to [person]**: (e.g., 'talk_to guard') Speak to someone.`);
+            renderOutput(`**show [item]**: (e.g., 'show worn_notebook to guard') Show an item to someone.`);
+            renderOutput(`**enter [code]**: Input a code into a keypad.`);
+            renderOutput(`**inventory**: (or 'i') Check your inventory.`);
+            renderOutput(`**check stats**: (or 'check quests') Check your status.`);
+        }
+        
+        // --- RPG MECHANIC HANDLERS ---
+        
+        function handleTalk(noun) {
+            // Guard dialogue at Archive Entrance
+            if (noun === 'guard' && player.currentRoom === 'archive_entrance') {
+                renderOutput("The guard remains impassive. You try to speak, but the words feel flat. He says, 'Your presence is disruptive. Depart.'");
+
+                // INFLUENCE CHECK: Player needs Influence > 1 to succeed in dialogue
+                if (player.stats.influence > 1) {
+                    renderOutput("As you speak, you realize the source of his rigidity. You project a feeling of necessary order—not disruption—directly into his perception. He blinks slowly.", 'success-message');
+                    renderOutput("'The Archive is closed... but... I sense a specific gravity to your purpose. Very well, you may enter.' The guard steps aside.", 'system-message');
+                    world.archive_entrance.exits['east'] = 'archive_main_hall'; // Dynamically open the new path
+                    delete world.archive_entrance.interactions.guard; // Guard is now just a feature, not a blocker
+                    handleGo('east'); // Move immediately into the next room
+                } else {
+                    renderOutput("You lack the conviction to override his orders. He raises an eyebrow, silently daring you to stay.", 'error-message');
+                }
+                return;
+            }
+            
+            renderOutput(`There is no one here by the name of ${noun.replace(/_/g, ' ')} to talk to.`);
+        }
+        
+        function handleShow(noun, target) {
+            if (!player.inventory.includes(noun)) {
+                renderOutput(`You don't have the ${noun.replace(/_/g, ' ')} to show.`, 'error-message');
+                return;
+            }
+            
+            // Show WORN_NOTEBOOK to GUARD
+            if (noun === 'worn_notebook' && target === 'guard' && player.currentRoom === 'archive_entrance') {
+                renderOutput("You show the guard the worn notebook. His eyes briefly fix on the scribbled words: Nature, Art, History. His composure cracks slightly.", 'system-message');
+                
+                // This is an alternate way to pass the check if Influence is low
+                if (player.stats.influence >= 1) { 
+                    renderOutput("'That... that is not a record I recognize, but it has the pattern of truth. You may enter.' The path opens.", 'success-message');
+                    world.archive_entrance.exits['east'] = 'archive_main_hall'; 
+                    delete world.archive_entrance.interactions.guard;
+                    handleGo('east');
+                    return;
+                }
+            }
+            
+            renderOutput("You show the item, but get no reaction.", 'error-message');
+        }
+
+        function handleUse(noun, target) {
+            if (!player.inventory.includes(noun)) {
+                renderOutput(`You don't have the ${noun.replace(/_/g, ' ')} to use.`, 'error-message');
+                return;
+            }
+
+            // --- HISTORY VAULT PUZZLE SOLUTION ---
+            if (noun === 'charcoal_pencil' && target === 'pedestal' && player.currentRoom === 'history_vault') {
+                renderOutput("You press the charcoal pencil into the pedestal's slot. The latent energy in the room spikes. The scroll instantly detaches.", 'system-message');
+                
+                // Quest Update
+                player.quests.journeyOfThree = 'history_complete';
+                player.stats.influence += 2; // Reward for solving the core puzzle
+                
+                // Update items
+                player.inventory = player.inventory.filter(item => item !== 'charcoal_pencil');
+                world.history_vault.items = world.history_vault.items.filter(item => item !== 'sealed_scroll');
+                player.inventory.push('unsealed_history'); // Add the completed artifact
+                
+                renderOutput("The pencil has been expended, sacrificing itself to unlock the **History** artifact. **Your INFLUENCE increases by 2.**", 'success-message');
+                renderOutput("You have completed the **History** component of the Journey of Three.", 'success-message');
+                return;
+            }
+            
+            renderOutput("You aren't sure how to use that right now or on that target. (Try 'use [item] on [target]')", 'error-message');
+        }
+        
+        function handleEnter(code) {
+             // Keypad logic for history_vault
+            if (player.currentRoom === 'history_vault') {
+                if (code === '2025' || code === 'tomorrow') { 
+                    // The "year the past became malleable" is a philosophical answer, often a placeholder for "now" or "the future."
+                    renderOutput("The keypad flashes green and displays the message: **'ACCESS GRANTED: The past is simply a story we tell ourselves today.'**", 'success-message');
+                    player.quests.found_history_cipher = true; // Opens the path
+                    world.history_vault.interactions.keypad = "The keypad is now inert. The path is unlocked.";
+                    // The GO North command will now work due to the check in handleGo
+                } else {
+                    renderOutput("The keypad rejects the code. The past is not what you think it is.", 'error-message');
+                }
+                return;
+            }
+            renderOutput("There is nothing here to enter a code into.", 'error-message');
+        }
+        
+        // --- Utility ---
+        function renderOutput(text, style = 'game-text') {
+            const p = document.createElement('p');
+            p.innerHTML = text; // Using innerHTML to allow for bold tags etc.
+            p.className = style;
+            output.appendChild(p);
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function renderOutput(text, style = 'game-text') {
+            const p = document.createElement('p');
+            p.innerHTML = text; 
+            
+            // Handle specific styling for echoes vs system messages
+            if (style === 'user-input-echo') {
+                p.className = 'text-[#89b4fa] font-mono';
+            } else if (style === 'system-message') {
+                p.className = 'text-[#f9e2af] italic border-l-2 border-[#f9e2af] pl-2';
+            } else if (style === 'error-message') {
+                p.className = 'text-[#f38ba8] font-semibold';
+            } else if (style === 'location-title') {
+                p.className = 'text-[#a6e3a1] font-extrabold text-xl mt-4 border-b border-[#45475a] pb-1';
+            } else if (style === 'success-message') {
+                 p.className = 'text-[#a6e3a1] font-bold';
+            } else {
+                p.className = 'text-white';
+            }
+
+            output.appendChild(p);
+            output.scrollTop = output.scrollHeight;
+        }
+
+
+        // --- Start the Game ---
+        startGame();
+
+    </script>
+</body>
+</html>
