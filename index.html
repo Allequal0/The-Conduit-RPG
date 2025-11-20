@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Conduit: A Subconscious Scheme (V 3.0)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #1e1e2e; color: #cdd6f4; }
+        #game-output { 
+            max-height: 70vh; 
+            overflow-y: auto; 
+            scroll-behavior: smooth;
+            border-bottom: 2px solid #45475a;
+        }
+        #user-input {
+            background-color: #313244;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+        }
+        #user-input:focus {
+            outline: none;
+            border-color: #89b4fa;
+            box-shadow: 0 0 0 3px rgba(137, 180, 250, 0.3);
+        }
+        .prompt-arrow { color: #89b4fa; }
+        .system-message { color: #f9e2af; font-style: italic; }
+        .error-message { color: #f38ba8; }
+        .location-title { color: #a6e3a1; font-weight: 800; }
+        .success-message { color: #a6e3a1; font-weight: bold; }
+        .user-input-echo { color: #89b4fa; font-mono; }
+        .final-ending { color: #b4befe; font-size: 1.5rem; text-align: center; margin-top: 2rem; }
+    </style>
+</head>
+<body class="p-4 flex flex-col h-screen max-w-4xl mx-auto">
+
+    <!-- Header -->
+    <header class="text-center mb-4">
+        <h1 class="text-4xl font-extrabold text-white tracking-tight">The Conduit</h1>
+        <p class="text-sm text-[#b4befe] mt-1">A Subconscious Scheme (V 3.0 - Final)</p>
+    </header>
+
+    <!-- Game Output Window -->
+    <div id="game-output" class="flex-grow p-4 space-y-3 bg-[#282a36] rounded-t-xl shadow-inner">
+        <!-- Game text will be rendered here by JavaScript -->
+    </div>
+
+    <!-- Input Area -->
+    <div class="mt-0 flex">
+        <span class="prompt-arrow p-3 bg-[#313244] rounded-bl-xl border-t-2 border-l-2 border-b-2 border-transparent">>&nbsp;</span>
+        <input type="text" id="user-input" placeholder="Type 'look', 'go [direction]', 'take [item]', 'use [item]'..."
+               class="flex-grow p-3 rounded-br-xl focus:outline-none w-full">
+    </div>
+
+    <!-- Core Game Engine (JavaScript) -->
+    <script>
+        // --- DOM Elements ---
+        const output = document.getElementById('game-output');
+        const input = document.getElementById('user-input');
+
+        // --- Player Model ---
+        const player = {
+            currentRoom: 'studio',
+            inventory: [],
+            stats: {
+                influence: 1,  // The core RPG stat
+                observation: 1 // For seeing details
+            },
+            quests: {
+                journeyOfThree: 'inactive', // 'active', 'history_complete', 'art_complete', 'nature_complete', 'complete'
+                found_history_cipher: false,
+                found_art_cipher: false
+            }
+        };
+
+        // --- World Model (The FSM) ---
+        const world = {
+            // =======================================================================
+            // 1. HOME BASE / INITIAL ZONE
+            // =======================================================================
+            'studio': {
+                name: "The Conduit's Studio",
+                description: "A sparse, high-ceiling room lit by a single, bare bulb. The air smells of old paper, charcoal, and ozone. A massive, unfinished canvas dominates the east wall, depicting a complex, web-like city. A simple desk sits to the west. A heavy steel door leads [north] to the city streets. A small, hidden [cubby] might be worth investigating.",
+                exits: { 'north': 'street_corner' },
+                items: ['charcoal_pencil'],
+                interactions: {
+                    'canvas': "You look at the canvas. It's a map of the city, but the streets are drawn like synapses, connecting everything in a 'subconscious scheme'. It feels... unfinished.",
+                    'desk': "The desk is bare except for a [charcoal_pencil].",
+                    'cubby': "Tucked away in a dark cubby is a [worn_notebook]. You recognize the cover immediately."
+                }
+            },
+            'street_corner': {
+                name: "Street Corner (Rain)",
+                description: "You are on a rain-slicked street corner under a flickering neon sign. The city towers above, a monument of steel and glass. You can go [south] back into your studio, [east] towards the old Archive (History Arc), or [west] towards the Cafe of Whispers.",
+                exits: { 'south': 'studio', 'east': 'archive_entrance', 'west': 'cafe_of_whispers' },
+                items: [],
+                interactions: {
+                    'sign': "The neon sign buzzes, its red light flickering. It reads 'All Things Connect'. It pulses slightly faster than normal."
+                }
+            },
+            'cafe_of_whispers': {
+                name: "The Cafe of Whispers",
+                description: "A dimly lit cafe where patrons speak in hushed tones, surrounded by dusty, framed photographs of old architecture. A single, empty [table] sits in the corner. The door leads [east] back to the street. A path [north] leads toward the Grand Gallery.",
+                exits: { 'east': 'street_corner', 'north': 'art_gallery_lobby' },
+                items: [],
+                interactions: {
+                    'table': "The surface is sticky. Scratched into the wood is a crude diagram of three interlocking circles labelled 'N', 'A', and 'H'. This is the **Journey of Three** cipher.",
+                    'photographs': "The photos show the city's original structure. They seem to suggest the city was built not by engineers, but by artists."
+                }
+            },
+
+            // =======================================================================
+            // 2. HISTORY ARC (Archive)
+            // =======================================================================
+            'archive_entrance': {
+                name: "Archive Entrance",
+                description: "A grand, marble building stands before you. A stoic-looking [guard] stands by the door. You can go [west] back to the street.",
+                exits: { 'west': 'street_corner' },
+                items: [],
+                interactions: {
+                    'guard': "The guard is a tall man in a crisp, grey uniform. 'The Archive is closed for... restructuring. No visitors.' You could try to [talk_to guard] or [show guard] something."
+                }
+            },
+            'archive_main_hall': {
+                name: "The Main Hall of Records",
+                description: "The air here is cold and smells intensely of dust and ozone. Rows of shelving stretch into the distance. A thick steel door marked 'VAULT' is to the [north]. You can go [south] back to the entrance.",
+                exits: { 'south': 'archive_entrance' },
+                items: [],
+                interactions: {
+                    'vault': "The vault door is sealed and has a simple numeric [keypad]. The keypad flashes a message: 'INPUT KEY: The year the past became malleable.'"
+                }
+            },
+            'history_vault': {
+                name: "The History Vault (Objective: History)",
+                description: "A small, reinforced room. A pedestal holds a single, sealed [scroll]. The air hums with latent energy—this is a nexus of history. The pedestal has a slot matching the shape of the [charcoal_pencil] you carry. The exit is [south].",
+                exits: { 'south': 'archive_main_hall' },
+                items: ['sealed_scroll'],
+                interactions: {
+                    'scroll': "The sealed scroll is clearly the artifact you need for the 'History' component.",
+                    'pedestal': "The pedestal has a slot for a writing implement, perhaps to record the final historical truth."
+                }
+            },
+
+            // =======================================================================
+            // 3. ART ARC (Gallery)
+            // =======================================================================
+            'art_gallery_lobby': {
+                name: "Grand Gallery Lobby",
+                description: "A minimalist space of white marble and high-end security cameras. A velvet rope blocks the way [east] to the main exhibits. A small, nervous [curator] stands nearby. The door leads [south] back to the Cafe.",
+                exits: { 'south': 'cafe_of_whispers' },
+                items: [],
+                interactions: {
+                    'curator': "The curator nervously adjusts his tie. 'I'm sorry, sir/ma'am, the gallery is closed. An incident involving an anomalous work of art.'"
+                }
+            },
+            'curator_office': {
+                name: "Curator's Office",
+                description: "A chaotic room filled with tax documents, art manifests, and cheap coffee cups. A set of [blueprints] sits on the desk. You can return [west] to the lobby.",
+                exits: { 'west': 'art_gallery_lobby' },
+                items: ['set_of_blueprints'],
+                interactions: {
+                    'blueprints': "They show the gallery layout. A ventilation shaft leads to a 'Hidden Loft' above the main exhibit."
+                }
+            },
+            'hidden_loft': {
+                name: "Hidden Loft (Objective: Art)",
+                description: "A dusty, cramped space directly above the exhibit hall. Below, you can see the main room through a ventilation grate. In the corner, a canvas glows faintly. It holds a tube of paint labelled 'Unseen Hues.' You can go [south] back down to the office.",
+                exits: { 'south': 'curator_office' },
+                items: ['unseen_hues'],
+                interactions: {
+                    'canvas': "It is a self-portrait of The Conduit, but the colors shift and pulse. You feel your Influence stat temporarily stabilize."
+                }
+            },
+
+            // =======================================================================
+            // 4. NATURE ARC (Park/Observatory)
+            // =======================================================================
+            'city_park_entrance': {
+                name: "City Park Entrance",
+                description: "The contrast is jarring: manicured concrete parkland surrounded by the sterile city towers. The air quality here is noticeably poor. You can see a path [north] leading to a polluted lake and a path [east] toward the old weather observatory.",
+                exits: { 'north': 'polluted_lake', 'east': 'observatory_deck', 'west': 'street_corner' }, // Path back to the street_corner (imaginary connection)
+                items: [],
+                interactions: {
+                    'concrete': "The grass is synthetic. Nature here is a carefully maintained lie."
+                }
+            },
+            'polluted_lake': {
+                name: "The Polluted Lake",
+                description: "The water is thick, oily, and still. The stench is oppressive. A withered [tree] stands alone by the water's edge, its leaves gray. You can return [south] to the park entrance.",
+                exits: { 'south': 'city_park_entrance' },
+                items: [],
+                interactions: {
+                    'tree': "The tree is dying, yet its root system seems unnaturally deep, fighting the pollution. It feels like a vessel for pure, contained nature."
+                }
+            },
+            'observatory_deck': {
+                name: "Observatory Deck",
+                description: "A high vantage point overlooking the city, designed to track weather and pollution levels. A broken [telescope] sits bolted to the deck. You can go [west] back to the park entrance. To the [north], a faint, buzzing portal can be seen.",
+                exits: { 'west': 'city_park_entrance', 'north': 'junction_point' }, // North exit is locked
+                items: ['living_seed'], // Seed is a reward for Nature puzzle
+                interactions: {
+                    'telescope': "The lens is shattered, unable to focus on the distant stars. It feels like the city intentionally blinded itself.",
+                    'portal': "It buzzes faintly, leading to an unknown point. A sign reads: 'Requires TRINITY KEY: N + A + H.'"
+                }
+            },
+
+            // =======================================================================
+            // 5. FINAL RESOLUTION
+            // =======================================================================
+            'junction_point': {
+                name: "The Final Junction",
+                description: "You stand in a quiet, non-space, a nexus woven from your thoughts. Before you are three receptacles, glowing faintly, waiting for their corresponding keys: HISTORY, ART, and NATURE. There is no going back.",
+                exits: {},
+                items: [],
+                interactions: {
+                    'receptacles': "Three points of light, demanding completeness. You must 'use [artifact] on receptacles'."
+                }
+            }
+        };
+
+        // --- Game Loop & Initialization ---
+        
+        const validVerbs = ['look', 'go', 'take', 'use', 'i', 'inv', 'inventory', 'check', 'stats', 'talk_to', 'show', 'enter', 'help'];
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const command = input.value.trim();
+                if (command) {
+                    renderOutput(`<span class="prompt-arrow">&gt;</span> ${command}`, 'user-input-echo');
+                    parseCommand(command);
+                }
+                input.value = '';
+                output.scrollTop = output.scrollHeight;
+            }
+        });
+
+        function startGame() {
+            renderOutput("Initializing: The Conduit (V 3.0 - Final)", 'system-message');
+            renderOutput("Type 'help' for a list of commands.", 'system-message');
+            handleLook();
+        }
+
+        function parseCommand(command) {
+            const parts = command.toLowerCase().split(' ');
+            const verb = parts[0];
+            const noun = parts.slice(1).join('_');
+            const target = parts.slice(2).join('_');
+
+            if (!validVerbs.includes(verb)) {
+                renderOutput("I don't understand that command. (Try 'help')", 'error-message');
+                return;
+            }
+
+            switch (verb) {
+                case 'look': handleLook(noun); break;
+                case 'go': handleGo(noun); break;
+                case 'take': handleTake(noun); break;
+                case 'use': handleUse(noun, target); break;
+                case 'i': case 'inv': case 'inventory': handleInventory(); break;
+                case 'check': case 'stats': handleCheck(noun); break;
+                case 'talk_to': handleTalk(noun); break;
+                case 'show': handleShow(noun, target); break;
+                case 'enter': handleEnter(noun); break;
+                case 'help': handleHelp(); break;
+            }
+        }
+
+        // --- Core Command Handlers ---
+
+        function handleLook(noun) {
+            const room = world[player.currentRoom];
+            if (!noun) {
+                renderOutput(room.name, 'location-title');
+                renderOutput(room.description);
+                if (room.items && room.items.length > 0) {
+                    renderOutput(`You see: ${room.items.join(', ').replace(/_/g, ' ')}.`);
+                }
+            } else {
+                if (room.interactions[noun]) {
+                    renderOutput(room.interactions[noun]);
+                } else if (player.inventory.includes(noun)) {
+                    renderOutput(`You examine the ${noun.replace(/_/g, ' ')} in your inventory. It feels important.`);
+                } else {
+                    renderOutput("You don't see anything special about that.", 'error-message');
+                }
+            }
+        }
+
+        function handleGo(direction) {
+            const room = world[player.currentRoom];
+            
+            // SPECIAL EXIT LOGIC: History Arc Vault Access
+            if (player.currentRoom === 'archive_main_hall' && direction === 'north') {
+                if (player.quests.found_history_cipher) {
+                    player.currentRoom = room.exits[direction];
+                    handleLook(); 
+                } else {
+                    renderOutput("The steel door is sealed. You must first unlock the historical access using the cipher.", 'error-message');
+                }
+                return;
+            }
+            
+             // SPECIAL EXIT LOGIC: Nature Arc Final Portal
+            if (player.currentRoom === 'observatory_deck' && direction === 'north') {
+                const keys = ['unsealed_history', 'unsealed_art', 'unsealed_nature'];
+                const completed = keys.every(key => player.inventory.includes(key));
+                
+                if (completed) {
+                    player.currentRoom = room.exits[direction];
+                    handleLook(); 
+                } else {
+                    renderOutput("The portal rejects your touch. It buzzes the message: 'TRINITY KEY required. Missing: " + keys.filter(k => !player.inventory.includes(k)).map(k => k.split('_')[1]).join(', ') + ".'", 'error-message');
+                }
+                return;
+            }
+
+            if (room.exits[direction]) {
+                player.currentRoom = room.exits[direction];
+                handleLook();
+            } else {
+                renderOutput("You can't go that way.", 'error-message');
+            }
+        }
+
+        function handleTake(noun) {
+            const room = world[player.currentRoom];
+            
+            // Notebook (Inciting Incident)
+            if (noun === 'worn_notebook' && player.currentRoom === 'studio') {
+                player.inventory.push(noun);
+                renderOutput(`You took the ${noun.replace(/_/g, ' ')}. It feels warm to the touch.`);
+                if (player.quests.journeyOfThree === 'inactive') {
+                    player.quests.journeyOfThree = 'active';
+                    renderOutput("You open the first page. **[Nature], [Art], and [History]**. A journey of three has begun.", 'success-message');
+                }
+                room.interactions.cubby = "The cubby is now empty.";
+                return;
+            }
+             
+            // History Cipher (from Cafe)
+            if (noun === 'history_cipher' && player.currentRoom === 'cafe_of_whispers' && !player.inventory.includes('history_cipher')) {
+                player.inventory.push(noun);
+                renderOutput("You trace the diagram on the table and etch it into a small piece of paper—the **history_cipher**.", 'success-message');
+                world.cafe_of_whispers.interactions.table = "The table is sticky and scarred.";
+                return;
+            }
+
+            // Unseen Hues (Art item)
+            if (noun === 'unseen_hues' && player.currentRoom === 'hidden_loft') {
+                player.inventory.push(noun);
+                renderOutput("You take the tube of **unseen_hues**. It hums with raw artistic potential. **Your INFLUENCE increases by 1.**", 'success-message');
+                player.stats.influence += 1;
+                room.items = room.items.filter(item => item !== noun);
+                return;
+            }
+
+            // Generic item logic
+            if (room.items && room.items.includes(noun)) {
+                room.items = room.items.filter(item => item !== noun);
+                player.inventory.push(noun);
+                renderOutput(`You took the ${noun.replace(/_/g, ' ')}.`);
+            } else {
+                renderOutput("You can't take that.", 'error-message');
+            }
+        }
+        
+        function handleInventory() {
+            if (player.inventory.length === 0) {
+                renderOutput("Your inventory is empty.");
+            } else {
+                renderOutput("You are carrying: " + player.inventory.map(i => `**${i.replace(/_/g, ' ')}**`).join(', '));
+            }
+        }
+
+        function handleCheck(noun) {
+            if (!noun || noun === 'stats') {
+                renderOutput(`--- Conduit Stats ---`);
+                renderOutput(`Observation: ${player.stats.observation}`);
+                renderOutput(`Influence: ${player.stats.influence}`);
+            } else if (noun === 'quests' || noun === 'journal') {
+                renderOutput(`--- Quest Log ---`);
+                renderOutput(`The Journey of Three: ${player.quests.journeyOfThree.replace(/_/g, ' ')}`);
+                renderOutput(`  - History: ${player.inventory.includes('unsealed_history') ? 'COMPLETE' : 'Pending'}`);
+                renderOutput(`  - Art: ${player.inventory.includes('unsealed_art') ? 'COMPLETE' : 'Pending'}`);
+                renderOutput(`  - Nature: ${player.inventory.includes('unsealed_nature') ? 'COMPLETE' : 'Pending'}`);
+            } else {
+                renderOutput("You can 'check stats' or 'check quests'.", 'error-message');
+            }
+        }
+
+        function handleHelp() {
+            renderOutput(`--- Common Commands ---`);
+            renderOutput(`**look** / **look [item]**: Observe the room or an item.`);
+            renderOutput(`**go [direction]**: (e.g., 'go north') Move.`);
+            renderOutput(`**take [item]**: (e.g., 'take worn_notebook') Pick up an item.`);
+            renderOutput(`**use [item] on [target]**: Interact with the world.`);
+            renderOutput(`**talk_to [person]**: Speak to someone.`);
+            renderOutput(`**show [item] to [person]**: Present an item.`);
+            renderOutput(`**enter [code]**: Input a code.`);
+            renderOutput(`**inventory** / **i**: Check your items.`);
+            renderOutput(`**check stats** / **check quests**: View status.`);
+        }
+        
+        // --- RPG MECHANIC HANDLERS ---
+        
+        function handleTalk(noun) {
+            // Guard dialogue (History Arc)
+            if (noun === 'guard' && player.currentRoom === 'archive_entrance') {
+                if (player.stats.influence > 1 || player.inventory.includes('worn_notebook')) {
+                    renderOutput("You speak, and the words carry the weight of necessity. Or perhaps the sight of the notebook breaks his focus. He blinks slowly.", 'success-message');
+                    renderOutput("'The Archive is closed... but... I sense a specific gravity to your purpose. Very well, you may enter.' The guard steps aside.", 'system-message');
+                    world.archive_entrance.exits['east'] = 'archive_main_hall';
+                    handleGo('east');
+                } else {
+                    renderOutput("'I already told you, the Archive is closed. Move along.'", 'error-message');
+                }
+                return;
+            }
+            
+            // Curator dialogue (Art Arc)
+            if (noun === 'curator' && player.currentRoom === 'art_gallery_lobby') {
+                renderOutput("The curator is near hysteria. 'That canvas... it's corrupting the entire collection! It's radiating dissonance! Wait... your aura... it's stable. Are you... a Conduit?'");
+
+                // INFLUENCE CHECK for office key
+                if (player.stats.influence >= 2) {
+                     renderOutput("You project calm. The curator immediately trusts you. 'My office is [east]. Please, search for the blueprints. We need to find the anomaly's source!'", 'success-message');
+                     world.art_gallery_lobby.exits['east'] = 'curator_office';
+                } else {
+                    renderOutput("'I can't trust anyone! Get out!' He pushes you back. You need more Influence.", 'error-message');
+                }
+                return;
+            }
+            
+            renderOutput(`There is no one here by the name of ${noun.replace(/_/g, ' ')} to talk to.`);
+        }
+        
+        function handleUse(noun, target) {
+            if (!player.inventory.includes(noun)) {
+                renderOutput(`You don't have the ${noun.replace(/_/g, ' ')} to use.`, 'error-message');
+                return;
+            }
+            
+            // HISTORY ARC RESOLUTION: Use charcoal_pencil on pedestal
+            if (noun === 'charcoal_pencil' && target === 'pedestal' && player.currentRoom === 'history_vault') {
+                if (player.inventory.includes('unsealed_history')) {
+                     renderOutput("You have already connected History. The pedestal is inert.", 'error-message');
+                     return;
+                }
+                renderOutput("You press the charcoal pencil into the pedestal's slot. The latent energy in the room spikes, flowing from the pencil into the scroll. The scroll instantly detaches.", 'system-message');
+                
+                player.inventory = player.inventory.filter(item => item !== 'charcoal_pencil');
+                player.inventory.push('unsealed_history');
+                player.stats.influence += 2; 
+                
+                renderOutput("The pencil has been expended, sacrificing itself to unlock the **History** artifact. **Your INFLUENCE increases by 2.**", 'success-message');
+                renderOutput("You have completed the **History** component of the Journey of Three.", 'success-message');
+                return;
+            }
+
+            // ART ARC RESOLUTION: Use unseen_hues on canvas
+            if (noun === 'unseen_hues' && target === 'canvas' && player.currentRoom === 'hidden_loft') {
+                 if (player.inventory.includes('unsealed_art')) {
+                     renderOutput("The Art artifact is already unified.", 'error-message');
+                     return;
+                }
+                renderOutput("You squeeze the 'unseen hues' onto the pulsing canvas. The colors detonate in a silent flash of pure, perfect light. The canvas itself shrinks into a portable, pulsating sphere.", 'system-message');
+                
+                player.inventory = player.inventory.filter(item => item !== 'unseen_hues');
+                player.inventory.push('unsealed_art');
+                player.stats.observation += 1;
+                
+                renderOutput("The hues are consumed, sacrificing themselves to capture the **Art** artifact. **Your OBSERVATION increases by 1.**", 'success-message');
+                renderOutput("You have completed the **Art** component of the Journey of Three.", 'success-message');
+                return;
+            }
+
+            // NATURE ARC RESOLUTION: Use unsealed_art on tree
+            if (noun === 'unsealed_art' && target === 'tree' && player.currentRoom === 'polluted_lake') {
+                 if (player.inventory.includes('unsealed_nature')) {
+                     renderOutput("The Nature artifact is already connected.", 'error-message');
+                     return;
+                }
+                if (!player.inventory.includes('unsealed_history')) {
+                    renderOutput("The tree rejects the art. It needs to sense the full weight of History connected to the Art before it will yield.", 'error-message');
+                    return;
+                }
+                
+                renderOutput("You touch the 'unsealed_art' sphere to the withered tree. The Art artifact resonates with the History artifact in your pack. A massive charge of energy flows into the tree, and a single, perfect **living_seed** is expelled from its base.", 'system-message');
+                
+                // Do NOT remove the Art artifact, it's needed for the finale.
+                player.inventory.push('living_seed');
+                player.stats.influence += 2;
+                
+                renderOutput("The tree is healed. You have acquired the **living_seed**. **Your INFLUENCE increases by 2.**", 'success-message');
+                renderOutput("You are now ready to seek the final component for the Nature artifact.", 'success-message');
+                return;
+            }
+
+            // FINAL RESOLUTION: Use artifacts on receptacles
+            if (target === 'receptacles' && player.currentRoom === 'junction_point') {
+                // This is the final check before victory
+                if (noun === 'unsealed_history' || noun === 'unsealed_art' || noun === 'unsealed_nature') {
+                    if (player.inventory.includes(noun)) {
+                        player.inventory = player.inventory.filter(item => item !== noun);
+                        renderOutput(`The **${noun.split('_')[1]}** artifact slots perfectly into its receptacle. One point of the Trinity is lit.`, 'success-message');
+
+                        const keys = ['unsealed_history', 'unsealed_art', 'unsealed_nature'];
+                        const remaining = keys.filter(key => player.inventory.includes(key));
+
+                        if (remaining.length === 0) {
+                            handleEnding();
+                        } else {
+                            renderOutput(`Only **${remaining.length}** more artifacts remain to be connected.`, 'system-message');
+                        }
+                    } else {
+                        renderOutput("You do not have that artifact.", 'error-message');
+                    }
+                    return;
+                }
+            }
+            
+            renderOutput("You aren't sure how to use that right now or on that target. (Try 'use [item] on [target]')", 'error-message');
+        }
+        
+        function handleEnter(code) {
+             // Keypad logic for History Arc (Archive Main Hall)
+            if (player.currentRoom === 'archive_main_hall') {
+                if (code === '2025' || code === 'two_zero_two_five') { 
+                    renderOutput("The keypad flashes green and displays the message: **'ACCESS GRANTED: The past is simply a story we tell ourselves today.'**", 'success-message');
+                    player.quests.found_history_cipher = true; 
+                    world.archive_main_hall.interactions.vault = "The vault door is now unlocked and ready to open.";
+                } else {
+                    renderOutput("The keypad rejects the code. The year the past became malleable is not yet written in stone.", 'error-message');
+                }
+                return;
+            }
+            
+             // Nature Arc Final Artifact
+            if (player.currentRoom === 'observatory_deck' && player.inventory.includes('living_seed')) {
+                // The seed needs to be planted with the 'Art' and 'History' connected
+                if (code === 'plant') {
+                    renderOutput("You dig a small hole and plant the living seed. It immediately sprouts, weaving itself around the shattered telescope.", 'system-message');
+                    renderOutput("The seed consumes the shattered glass, using the observation data to compute its place in the universe. It grows into a perfect, spherical fruit.", 'system-message');
+                    
+                    player.inventory = player.inventory.filter(item => item !== 'living_seed');
+                    player.inventory.push('unsealed_nature');
+                    
+                    renderOutput("The fruit bursts, leaving behind the **Nature** artifact. **Your INFLUENCE increases by 2.**", 'success-message');
+                    player.stats.influence += 2;
+                    renderOutput("You have completed the **Nature** component of the Journey of Three. You now possess all three keys.", 'success-message');
+                    
+                    world.observatory_deck.interactions.portal = "The portal now hums powerfully, unlocked by the three artifacts.";
+                    return;
+                }
+            }
+            
+            renderOutput("There is nothing here to enter a code into, or that code is invalid.", 'error-message');
+        }
+        
+        function handleEnding() {
+            renderOutput("---", 'system-message');
+            renderOutput("The final artifacts connect. The HISTORY, ART, and NATURE receptacles flood the junction point with a universal wave of pure connectivity.", 'final-ending');
+            renderOutput("The 'subconscious scheme' is now complete. The universe yields to the will of the Conduit.", 'final-ending');
+            renderOutput("The rain stops outside. The neon sign glows steadily. The world is now ordered, guided by the influence you have mastered.", 'final-ending');
+            renderOutput("You have become the **Master Conduit.**", 'final-ending');
+            renderOutput("--- GAME ENDED ---", 'final-ending');
+            
+            // Disable input after victory
+            input.disabled = true;
+        }
+
+        // --- Utility ---
+        function renderOutput(text, style = 'game-text') {
+            const p = document.createElement('p');
+            p.innerHTML = text; 
+            
+            if (style === 'user-input-echo') {
+                p.className = 'text-[#89b4fa] font-mono';
+            } else if (style === 'system-message') {
+                p.className = 'text-[#f9e2af] italic border-l-2 border-[#f9e2af] pl-2';
+            } else if (style === 'error-message') {
+                p.className = 'text-[#f38ba8] font-semibold';
+            } else if (style === 'location-title') {
+                p.className = 'text-[#a6e3a1] font-extrabold text-xl mt-4 border-b border-[#45475a] pb-1';
+            } else if (style === 'success-message') {
+                 p.className = 'text-[#a6e3a1] font-bold';
+            } else if (style === 'final-ending') {
+                p.className = 'text-center text-3xl font-extrabold text-[#b4befe] py-4';
+            } else {
+                p.className = 'text-white';
+            }
+
+            output.appendChild(p);
+            output.scrollTop = output.scrollHeight;
+        }
+
+
+        // --- Start the Game ---
+        startGame();
+
+    </script>
+</body>
+</html>
